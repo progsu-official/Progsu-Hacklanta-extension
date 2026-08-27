@@ -31,6 +31,7 @@
   let alreadyContactedBanner = null;
   let lastAutoPasteKey = '';
   let scanTimer = null;
+  let contactedMap = {};
 
   // LinkedIn ships several messaging layouts (full page, overlay bubble,
   // "Message" modal from a profile). Cast a wide net, then filter.
@@ -71,6 +72,7 @@
   async function init() {
     await loadSettings();
     await loadTemplates();
+    await loadContactedMap();
     observePageChanges();
     checkCurrentPage();
     scan();
@@ -178,6 +180,8 @@
 
       if (res && res.success && res.contacted && settings.showBadge !== false) {
         showAlreadyContactedBanner(res.details);
+      } else {
+        removeAlreadyContactedBanner();
       }
     } catch (e) { /* ignore */ }
   }
@@ -224,6 +228,126 @@
     const existing = document.getElementById('progsu-contacted-banner');
     if (existing) existing.remove();
   }
+
+  // ============================================================
+  // Contact markers on profile links
+  // ============================================================
+  // Annotates the /in/ links LinkedIn has already drawn — search results,
+  // My Network, connection lists, the feed — with a pill naming whoever on
+  // the team reached out first. Deliberately passive: it reads what is on
+  // screen and never scrolls or fetches to harvest more.
+
+  // Anchored on href, never on class names. LinkedIn renames classes
+  // constantly (see COMPOSER_SELECTOR above); the /in/ href is the part of
+  // their markup that stays put.
+  const PROFILE_LINK_SELECTOR = 'a[href*="/in/"]';
+
+  // Links that point at a person but aren't a person in a list: our own UI
+  // and the top nav. Kept narrow on purpose — a bare 'header' rule also
+  // swallowed real result rows, and a missing marker defeats the feature
+  // while a redundant one is only untidy.
+  const MARKER_EXCLUDE_SELECTOR = [
+    '#progsu-paste-toolbar',
+    '#progsu-contacted-banner',
+    '.global-nav',
+    '.msg-form'
+  ].join(', ');
+
+  // Ancestors that represent "one person in a list", used to keep a row from
+  // being stamped twice.
+  const MARKER_ROW_SELECTOR = 'li, article, [data-view-name], .artdeco-entity-lockup';
+
+  async function loadContactedMap() {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'GET_CONTACTED' });
+      if (res && res.success) contactedMap = res.contactedProfiles || {};
+    } catch (e) { /* extension context may be invalid */ }
+  }
+
+  function annotateProfileLinks() {
+    if (settings.showMarkers === false) return;
+
+    document.querySelectorAll(PROFILE_LINK_SELECTOR).forEach(link => {
+      // The MutationObserver fires on our own injection, so a link we have
+      // already considered must never be reconsidered — without this guard
+      // annotating triggers a scan that annotates again, forever.
+      if (link.dataset.progsuMarked) return;
+      if (link.closest(MARKER_EXCLUDE_SELECTOR)) return;
+
+      const url = normalizeProfileUrl(link.href);
+      if (!url) return;
+
+      link.dataset.progsuMarked = '1';
+
+      const details = contactedMap[url];
+      if (!details) return;
+
+      // LinkedIn points the avatar and the name at the same profile, so a row
+      // holds two or three links per person. Skip the image-only ones, then
+      // skip anything in a row already carrying a pill.
+      if (!(link.textContent || '').trim()) return;
+
+      const row = link.closest(MARKER_ROW_SELECTOR) || link.parentElement;
+      if (row && row.querySelector('[data-progsu-marker]')) return;
+
+      link.appendChild(buildMarker(details));
+    });
+  }
+
+  function buildMarker(details) {
+    const who = details.sentBy || 'a team member';
+    const label = 'Contacted by ' + who + ' on ' + formatDate(details.dateSent) +
+                  (details.templateUsed ? ' · ' + details.templateUsed : '');
+
+    const marker = document.createElement('span');
+    marker.className = 'progsu-contact-marker';
+    marker.dataset.progsuMarker = '1';
+    marker.title = label;
+    // The pill lives inside LinkedIn's name link, so without this a screen
+    // reader folds "Sam" into the link text and announces "Jane Doe Sam".
+    // role="img" + aria-label makes it one labelled unit instead.
+    marker.setAttribute('role', 'img');
+    marker.setAttribute('aria-label', label);
+    marker.innerHTML =
+      '<svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" ' +
+      'stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">' +
+      '<polyline points="20 6 9 17 4 12"/></svg>' +
+      '<span>' + escapeHtml(firstNameOf(who)) + '</span>';
+    return marker;
+  }
+
+  function firstNameOf(name) {
+    const first = String(name || '').trim().split(/\s+/)[0] || 'team';
+    return first.length > 12 ? first.slice(0, 12) + '\u2026' : first;
+  }
+
+  // Marking a link records that it was *considered*, contacted or not, so a
+  // newly contacted profile would keep its stale "not contacted" verdict.
+  // Any change to the list therefore clears every verdict and starts over.
+  function refreshMarkers() {
+    document.querySelectorAll('[data-progsu-marker]').forEach(el => el.remove());
+    document.querySelectorAll('[data-progsu-marked]').forEach(el => {
+      delete el.dataset.progsuMarked;
+    });
+    annotateProfileLinks();
+  }
+
+  // Fires when the popup marks someone, removes an entry, or imports a
+  // teammate's list — the lists on screen update without a reload.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+
+    if (changes.contactedProfiles) {
+      contactedMap = changes.contactedProfiles.newValue || {};
+      refreshMarkers();
+      if (currentProfileUrl) checkIfContacted();
+    }
+
+    if (changes.settings) {
+      settings = changes.settings.newValue || {};
+      refreshMarkers();
+    }
+  });
 
   // ============================================================
   // Composer detection
@@ -291,6 +415,8 @@
 
   // Runs on mutations, on a timer, and after navigation.
   function scan() {
+    annotateProfileLinks();
+
     const box = findComposer();
 
     if (!box) {

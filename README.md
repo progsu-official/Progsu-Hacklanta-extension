@@ -95,6 +95,16 @@ When you open a profile someone on the team has already contacted, a banner appe
 
 Nothing is blocked — you can still message them. It just makes sure it's a deliberate choice.
 
+You also don't have to open a profile to find out. Anywhere LinkedIn lists people — search results, My Network, your connections, the feed — anyone already contacted gets a small amber badge next to their name showing who reached out:
+
+```
+Jane Doe  ✓ Sam
+```
+
+Hover it for the full detail: who, when, and which template. The badges appear on results as you scroll and update the moment someone is marked or a teammate's list is imported — no page reload. Turn them off in Settings with **Tag contacted people in search results**.
+
+This only reads the profile links LinkedIn has already drawn on screen. It never scrolls or fetches on its own to harvest more.
+
 The **Contacted** tab in the popup lists everyone recorded, with search. Remove an entry if it was marked by mistake. The header shows counts for today and all-time.
 
 ---
@@ -120,6 +130,9 @@ A reasonable rhythm: everyone exports at the end of a session, one person merges
 | **Your name** | Stamped on every profile you mark as contacted, so the team can see who did outreach |
 | **Auto-paste** | Automatically pastes the default template when a composer opens |
 | **Show badge** | Shows the "already contacted" banner on profiles |
+| **Tag contacted people in search results** | Adds a badge next to already-messaged people in search, My Network, connections and the feed |
+
+| if the extention isnt working reload the page and it will load in on the current page |
 
 ---
 
@@ -130,7 +143,7 @@ manifest.json          Manifest V3 config, permissions, entry points
 background/
   background.js        Service worker — storage and message routing
 content/
-  content.js           Injected into LinkedIn: composer detection, paste, badges
+  content.js           Injected into LinkedIn: composer detection, paste, badges, list markers
   content.css          Styles for the on-page toolbar and banner
 popup/
   popup.html           Popup UI — Templates / Contacted / Settings tabs
@@ -171,6 +184,9 @@ Mark Sent needs a profile URL to key the record on, and some message threads don
 **Placeholders show up literally in the sent message.**
 The value couldn't be read from the page — common on profiles with no listed company. Fill it in by hand before sending.
 
+**The badges next to names don't appear.**
+Check **Tag contacted people in search results** is on in Settings. If it is, the person may be recorded under a different profile URL than the one the list links to — open their profile and check for the banner. Failing that, LinkedIn changed their markup; see `MARKER_EXCLUDE_SELECTOR` in `content.js`.
+
 **Changes to the code don't take effect.**
 Go to `chrome://extensions` and hit reload on the extension card. Content script changes also need a LinkedIn tab reload.
 
@@ -183,6 +199,8 @@ No toolchain — edit a file, reload the extension at `chrome://extensions`, ref
 Two things worth knowing before changing `content.js`:
 
 **LinkedIn ships several messaging layouts** — full page, overlay bubble, and the modal launched from a profile. `COMPOSER_SELECTOR` casts a wide net across all of them and filters afterward. If the toolbar stops appearing, LinkedIn changed their markup and that selector list is the first place to look.
+
+**List markers key off `href`, not classes.** `annotateProfileLinks()` finds people by `a[href*="/in/"]` and normalizes the URL, because the `/in/` href is the one part of LinkedIn's markup that survives their redesigns. Two guards there are load-bearing: `data-progsu-marked` stops the MutationObserver from reacting to our own injection in an endless loop, and the row check stops a person being stamped twice when their avatar and name are separate links to the same profile.
 
 **Pasting is deliberately indirect.** LinkedIn's composer is a React-backed `contenteditable`, so setting `innerHTML` alone leaves the Send button disabled — React never sees the change. The paste path dispatches the events LinkedIn's own editor state listens for. Keep that in mind before simplifying it.
 

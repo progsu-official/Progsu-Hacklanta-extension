@@ -44,6 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const settingTeamName = document.getElementById('setting-team-name');
   const settingAutoPaste = document.getElementById('setting-auto-paste');
   const settingShowBadge = document.getElementById('setting-show-badge');
+  const settingShowMarkers = document.getElementById('setting-show-markers');
   const btnSaveSettings = document.getElementById('btn-save-settings');
 
   // Stats
@@ -111,6 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
       settingTeamName.value = settings.teamName || '';
       settingAutoPaste.checked = settings.autoPaste !== false;
       settingShowBadge.checked = settings.showBadge !== false;
+      settingShowMarkers.checked = settings.showMarkers !== false;
     }
   }
 
@@ -438,7 +440,8 @@ document.addEventListener('DOMContentLoaded', () => {
     settings = {
       teamName: settingTeamName.value.trim() || 'Team Member',
       autoPaste: settingAutoPaste.checked,
-      showBadge: settingShowBadge.checked
+      showBadge: settingShowBadge.checked,
+      showMarkers: settingShowMarkers.checked
     };
     await sendMsg({ type: 'SAVE_SETTINGS', settings });
     notifyContentScripts('SETTINGS_UPDATED');

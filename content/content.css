@@ -267,6 +267,48 @@
 }
 
 /* ============================================================
+   Contact marker — pill appended to profile links in lists
+   ============================================================
+   Rides inside LinkedIn's own <a>, on their light page. Reuses the
+   banner's amber so "already contacted" reads the same everywhere.
+
+   display:inline-flex is load-bearing twice over: it stops the parent
+   link's hover underline from being drawn through the pill, and it keeps
+   the pill on the name's baseline inside LinkedIn's flex rows.
+   ============================================================ */
+.progsu-contact-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid #B45309;
+  border-radius: 10px;
+  background: #FDE68A;
+  color: #92400E;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI Variable Text',
+               'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  vertical-align: middle;
+  text-decoration: none;
+  cursor: inherit;
+  animation: progsu-fade-in 160ms ease-out;
+}
+
+.progsu-contact-marker * {
+  box-sizing: border-box;
+}
+
+.progsu-contact-marker svg {
+  flex: 0 0 auto;
+  display: block;
+}
+
+/* ============================================================
    Motion
    ============================================================ */
 @keyframes progsu-slide-down {
@@ -282,6 +324,7 @@
 @media (prefers-reduced-motion: reduce) {
   #progsu-paste-toolbar,
   #progsu-contacted-banner,
+  .progsu-contact-marker,
   #progsu-paste-toolbar *,
   #progsu-contacted-banner * {
     animation-duration: 0.01ms !important;

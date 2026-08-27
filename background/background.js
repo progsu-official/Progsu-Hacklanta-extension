@@ -23,6 +23,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       contactedProfiles: {},   // { profileUrl: { name, dateSent, templateUsed, sentBy } }
       settings: {
         showBadge: true,        // Show "already contacted" badge on profiles
+        showMarkers: true,      // Tag already-contacted people in search/list views
         autoPaste: true,        // Automatically paste when chat opens
         teamName: 'Team Member' // Name of the person using this extension instance
       }
