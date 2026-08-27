@@ -34,21 +34,30 @@
 
   // LinkedIn ships several messaging layouts (full page, overlay bubble,
   // "Message" modal from a profile). Cast a wide net, then filter.
+  // Superset of every selector that has ever worked here. Detection is
+  // deliberately broad — findComposer() ranks the matches instead of relying
+  // on one selector being right, because LinkedIn renames classes often.
   const COMPOSER_SELECTOR = [
     '.msg-form__contenteditable[contenteditable="true"]',
     '.msg-form div[contenteditable="true"]',
+    '.msg-form__msg-content-container div[contenteditable="true"]',
     '[class*="msg-form"] div[contenteditable="true"]',
     '.msg-overlay-conversation-bubble div[contenteditable="true"]',
+    '.msg-s-message-list-container ~ div div[contenteditable="true"]',
     'form[class*="msg"] div[contenteditable="true"]',
-    'div[role="textbox"][contenteditable="true"][aria-label*="message" i]',
-    'div[role="textbox"][contenteditable="true"][aria-label*="write" i]',
-    'div[contenteditable="true"][data-placeholder*="message" i]'
+    'div[data-artdeco-is-focused] div[contenteditable="true"]',
+    'footer div[contenteditable="true"]',
+    'div[aria-label*="message" i][contenteditable="true"]',
+    'div[aria-label*="write" i][contenteditable="true"]',
+    'div[contenteditable="true"][data-placeholder*="message" i]',
+    'div[role="textbox"][contenteditable="true"]'
   ].join(', ');
 
-  // Other rich-text editors on LinkedIn that must never be treated as a chat box
+  // Other rich-text editors on LinkedIn that must never be treated as a chat box.
+  // Kept deliberately specific: a broad [class*="typeahead"] rule also matched
+  // .msg-connections-typeahead, which WRAPS the real message composer.
   const EXCLUDE_SELECTOR = [
     '.search-global-typeahead',
-    '[class*="typeahead"]',
     '.share-creation-state',
     '.share-box',
     '[class*="share-creation"]',
@@ -192,7 +201,11 @@
           <strong>Already Contacted</strong>
           <span>Messaged by <em>${escapeHtml(details.sentBy || 'a team member')}</em> on ${formatDate(details.dateSent)}</span>
         </div>
-        <button class="progsu-banner-dismiss" title="Dismiss">✕</button>
+        <button class="progsu-banner-dismiss" type="button" title="Dismiss" aria-label="Dismiss already-contacted warning">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
       </div>
     `;
 
@@ -228,10 +241,21 @@
     ].filter(Boolean).join(' ').toLowerCase();
 
     if (label.includes('search')) return false;
-    if (el.closest('.msg-form, [class*="msg-form"], .msg-overlay-conversation-bubble, [class*="msg-convo"], form[class*="msg"]')) {
-      return true;
-    }
-    return label.includes('message');
+    // Anything else that survived the selector list and the exclusions is
+    // treated as a candidate; findComposer() ranks them.
+    return true;
+  }
+
+  // Higher score = more likely to be the composer the user is looking at.
+  function composerScore(el) {
+    let score = 0;
+    if (el === document.activeElement || el.contains(document.activeElement)) score += 100;
+    if (el.closest('.msg-form, [class*="msg-form"], .msg-overlay-conversation-bubble, [class*="msg-convo"], form[class*="msg"]')) score += 50;
+    if (el.classList.contains('msg-form__contenteditable')) score += 25;
+    const label = (el.getAttribute('aria-label') || el.getAttribute('data-placeholder') || '').toLowerCase();
+    if (label.includes('message') || label.includes('write')) score += 10;
+    if (el.closest('.msg-overlay-conversation-bubble--is-minimized')) score -= 40;
+    return score;
   }
 
   function isVisible(el) {
@@ -255,12 +279,14 @@
     if (candidates.length === 0) return null;
     if (candidates.length === 1) return candidates[0];
 
-    const focused = candidates.find(el => el === document.activeElement || el.contains(document.activeElement));
-    if (focused) return focused;
-
-    const expanded = candidates.filter(el => !el.closest('.msg-overlay-conversation-bubble--is-minimized'));
-    const pool = expanded.length ? expanded : candidates;
-    return pool[pool.length - 1];
+    let best = candidates[0];
+    let bestScore = composerScore(best);
+    for (let i = 1; i < candidates.length; i++) {
+      // >= so that, on a tie, the most recently opened chat wins
+      const sc = composerScore(candidates[i]);
+      if (sc >= bestScore) { best = candidates[i]; bestScore = sc; }
+    }
+    return best;
   }
 
   // Runs on mutations, on a timer, and after navigation.
@@ -289,6 +315,15 @@
   // ============================================================
 
   function getRecipient(box) {
+    try {
+      return getRecipientUnsafe(box);
+    } catch (e) {
+      // A selector miss must not take down auto-paste or Mark Sent
+      return { name: currentProfileName || '', profileUrl: currentProfileUrl || '', company: '' };
+    }
+  }
+
+  function getRecipientUnsafe(box) {
     if (isProfilePage(location.href) && currentProfileName) {
       return { name: currentProfileName, profileUrl: currentProfileUrl, company: currentCompany };
     }
@@ -425,21 +460,28 @@
       const template = templates.find(t => t.id === selectEl.value) || currentTemplate();
       const recipient = getRecipient(activeBox);
 
-      if (!recipient.profileUrl) {
-        setStatus('No profile link found for this chat — open their profile to mark it', 'error');
-        return;
-      }
+      // Always record something. Preferring the recipient's profile URL keeps
+      // duplicate detection accurate, but a missing link must never mean
+      // "do nothing" — that silently loses the user's outreach history.
+      const profileUrl = recipient.profileUrl ||
+                         currentProfileUrl ||
+                         normalizeProfileUrl(location.href) ||
+                         location.href;
+      const isProfileLink = /linkedin\.com\/in\//i.test(profileUrl);
 
       try {
         await chrome.runtime.sendMessage({
           type: 'MARK_CONTACTED',
-          profileUrl: recipient.profileUrl,
-          name: recipient.name || 'Unknown',
+          profileUrl: profileUrl,
+          name: recipient.name || currentProfileName || 'Unknown',
           templateName: template ? template.name : 'Unknown',
           sentBy: settings.teamName || 'Team Member'
         });
         flashButton(markBtn, '✓ Marked!');
-        setStatus('', '');
+        setStatus(isProfileLink
+          ? ''
+          : 'Saved, but no profile link was found here — open their profile to link it properly.',
+          isProfileLink ? '' : 'warn');
       } catch (e) {
         setStatus('Could not save — try reloading the page', 'error');
       }
@@ -493,7 +535,10 @@
     if (!text) { el.hidden = true; el.textContent = ''; return; }
     el.hidden = false;
     el.textContent = text;
-    el.className = 'progsu-toolbar-status' + (kind === 'error' ? ' progsu-status-error' : '');
+    const mod = kind === 'error' ? ' progsu-status-error'
+              : kind === 'warn'  ? ' progsu-status-warn'
+              : '';
+    el.className = 'progsu-toolbar-status' + mod;
   }
 
   function flashButton(btn, label) {
@@ -667,8 +712,9 @@
     if (!isBoxEmpty(box)) return;
 
     // Keyed by conversation so a React re-render doesn't re-paste on a loop.
-    const key = conversationKey(box);
-    if (!key || key === lastAutoPasteKey) return;
+    // Falls back to the pathname so a failed recipient lookup can't disable it.
+    const key = conversationKey(box) || location.pathname || 'progsu-default';
+    if (key === lastAutoPasteKey) return;
     lastAutoPasteKey = key;
 
     setTimeout(() => {
@@ -761,6 +807,37 @@
     const d = new Date(isoString);
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
+
+  // ---- Diagnostic: run progsuDebug() in the console on a LinkedIn tab ----
+  window.progsuDebug = function () {
+    const all = document.querySelectorAll('div[contenteditable="true"]');
+    const matched = document.querySelectorAll(COMPOSER_SELECTOR);
+    const candidates = [];
+    matched.forEach(el => {
+      candidates.push({
+        cls: (el.className || '(none)').toString().slice(0, 60),
+        label: el.getAttribute('aria-label') || el.getAttribute('data-placeholder') || '',
+        isComposer: isComposer(el),
+        visible: isVisible(el),
+        score: isComposer(el) && isVisible(el) ? composerScore(el) : null,
+        excludedBy: el.closest(EXCLUDE_SELECTOR) ? (el.closest(EXCLUDE_SELECTOR).className || '').toString().slice(0, 40) : null
+      });
+    });
+    const chosen = findComposer();
+    const info = {
+      url: location.href,
+      contentEditablesOnPage: all.length,
+      matchedBySelectors: matched.length,
+      candidates: candidates,
+      chosenComposer: chosen ? (chosen.className || '(no class)').toString().slice(0, 60) : 'NONE FOUND',
+      toolbarPresent: !!document.getElementById('progsu-paste-toolbar'),
+      templatesLoaded: templates.length,
+      settings: settings,
+      recipient: getRecipient(chosen)
+    };
+    console.log('%c[Progsu diagnostic]', 'color:#818CF8;font-weight:bold', info);
+    return info;
+  };
 
   // ---- Messages from the popup ----
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

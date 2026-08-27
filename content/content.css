@@ -126,6 +126,9 @@
 .progsu-toolbar-inner {
   display: flex;
   align-items: center;
+  /* wrap the row before crushing the template name — in a narrow chat bubble
+     the buttons move to a second line instead of squeezing the select */
+  flex-wrap: wrap;
   gap: 8px;
   padding: 8px;
   background: var(--progsu-surface);
@@ -150,8 +153,9 @@
 .progsu-toolbar-label svg { flex-shrink: 0; }
 
 .progsu-template-select {
-  flex: 1;
-  min-width: 0;
+  /* keeps enough room to actually read a template name */
+  flex: 1 1 132px;
+  min-width: 132px;
   height: 32px;
   margin: 0;
   padding: 0 8px;
@@ -249,6 +253,12 @@
 }
 
 .progsu-toolbar-status[hidden] { display: none; }
+
+.progsu-status-warn {
+  background: #422006;
+  border-color: #B45309;
+  color: #FDE68A;
+}
 
 .progsu-status-error {
   background: #4C1D24;
