@@ -1,0 +1,24 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Node (not used today, but keeps stray installs out)
+node_modules/
+npm-debug.log*
+
+# Packaged builds
+*.zip
+*.crx
+*.pem
+
+# Exported outreach data — contains contact names and profile URLs,
+# should never be committed
+contacted-*.json
+export-*.json

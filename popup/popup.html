@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=400, initial-scale=1.0">
+  <title>Progsu Outreach Assistant</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="popup-header">
+      <div class="header-brand">
+        <div class="logo-icon">
+          <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 2L11 13"/>
+            <path d="M22 2L15 22L11 13L2 9L22 2Z"/>
+          </svg>
+        </div>
+        <div class="header-text">
+          <h1>Progsu</h1>
+          <span class="header-subtitle">LinkedIn Outreach Assistant</span>
+        </div>
+      </div>
+      <div class="header-stats" id="header-stats" role="status" aria-live="polite" aria-atomic="true">
+        <div class="stat-chip">
+          <span class="stat-value" id="stat-today">0</span>
+          <span class="stat-label">Today</span>
+        </div>
+        <div class="stat-chip">
+          <span class="stat-value" id="stat-total">0</span>
+          <span class="stat-label">Total</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Tab navigation -->
+    <nav class="tab-nav" role="tablist" aria-label="Sections">
+      <button class="tab-btn active" data-tab="templates" role="tab" aria-selected="true" aria-controls="tab-templates">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+        </svg>
+        Templates
+      </button>
+      <button class="tab-btn" data-tab="contacted" role="tab" aria-selected="false" aria-controls="tab-contacted">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        Contacted
+      </button>
+      <button class="tab-btn" data-tab="settings" role="tab" aria-selected="false" aria-controls="tab-settings">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Settings
+      </button>
+    </nav>
+
+    <!-- Tab content -->
+    <main class="tab-content">
+
+      <!-- Templates Tab -->
+      <section class="tab-panel active" id="tab-templates">
+        <div class="panel-header">
+          <h2>Message Templates</h2>
+          <button class="btn-ghost btn-sm" id="btn-add-template">
+            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="12" y1="5" x2="12" y2="19"/>
+              <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            New
+          </button>
+        </div>
+
+        <!-- Big paste button -->
+        <div class="paste-action-box" id="paste-action-box">
+          <button class="btn-paste-big" id="btn-paste-to-chat">
+            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 2L11 13"/>
+              <path d="M22 2L15 22L11 13L2 9L22 2Z"/>
+            </svg>
+            Paste to LinkedIn Chat
+          </button>
+          <p class="paste-hint">Open a LinkedIn chat, then paste your default template.</p>
+        </div>
+
+        <div class="template-list" id="template-list">
+          <!-- Populated by JS -->
+        </div>
+
+        <!-- Template editor (hidden by default) -->
+        <div class="template-editor hidden" id="template-editor">
+          <div class="editor-header">
+            <h3 id="editor-title">Edit Template</h3>
+            <button class="btn-ghost btn-sm" id="btn-close-editor" aria-label="Close editor" title="Close editor">
+              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
+          <div class="editor-body">
+          <div class="form-group">
+            <label for="template-name">Template Name</label>
+            <input type="text" id="template-name" placeholder="e.g. Cold Outreach v2">
+          </div>
+          <div class="form-group">
+            <label for="template-body">
+              Message Body
+              <span class="label-hint">Use {{firstName}}, {{lastName}}, {{fullName}}, {{company}} as variables</span>
+            </label>
+            <textarea id="template-body" rows="4" placeholder="Hi {{firstName}}, ..."></textarea>
+          </div>
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="template-default">
+              <span>Set as default template</span>
+            </label>
+          </div>
+          </div>
+          <div class="editor-actions">
+            <button class="btn-ghost" id="btn-cancel-edit">Cancel</button>
+            <button class="btn-primary" id="btn-save-template">Save Template</button>
+          </div>
+        </div>
+
+        <div class="variables-hint">
+          <strong>Available variables:</strong>
+          <div class="var-chips">
+            <code>{{firstName}}</code>
+            <code>{{lastName}}</code>
+            <code>{{fullName}}</code>
+            <code>{{company}}</code>
+          </div>
+        </div>
+      </section>
+
+      <!-- Contacted Tab -->
+      <section class="tab-panel" id="tab-contacted">
+        <div class="panel-header">
+          <h2>Contacted Profiles</h2>
+          <div class="panel-actions">
+            <button class="btn-ghost btn-sm" id="btn-export" title="Export list">
+              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Export
+            </button>
+            <button class="btn-ghost btn-sm" id="btn-import" title="Import list">
+              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              Import
+            </button>
+          </div>
+        </div>
+
+        <div class="search-bar">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input type="text" id="contacted-search" placeholder="Search contacted profiles...">
+        </div>
+
+        <div class="contacted-list" id="contacted-list">
+          <!-- Populated by JS -->
+        </div>
+
+        <div class="panel-footer">
+          <button class="btn-danger btn-sm" id="btn-clear-all">Clear All</button>
+        </div>
+
+        <!-- Import modal -->
+        <div class="modal hidden" id="import-modal" role="dialog" aria-modal="true" aria-labelledby="import-modal-title">
+          <div class="modal-content">
+            <h3 id="import-modal-title">Import Contacted Profiles</h3>
+            <p>Paste the JSON export data from another team member below. Profiles will be merged with your existing list.</p>
+            <textarea id="import-data" rows="6" placeholder='Paste JSON data here...'></textarea>
+            <div class="modal-actions">
+              <button class="btn-ghost" id="btn-cancel-import">Cancel</button>
+              <button class="btn-primary" id="btn-confirm-import">Import</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings Tab -->
+      <section class="tab-panel" id="tab-settings">
+        <div class="panel-header">
+          <h2>Settings</h2>
+        </div>
+
+        <div class="settings-list">
+          <div class="form-group">
+            <label for="setting-team-name">Your Name</label>
+            <input type="text" id="setting-team-name" placeholder="e.g. Joey">
+            <span class="form-hint">Used to track who sent each message</span>
+          </div>
+
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="setting-auto-paste" checked>
+              <span>Auto-paste template when chat opens</span>
+            </label>
+            <span class="form-hint">Automatically fills in the default template when you open a messaging window</span>
+          </div>
+
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="setting-show-badge" checked>
+              <span>Show "Already Contacted" warning banner</span>
+            </label>
+            <span class="form-hint">Display a warning banner on profiles that have already been messaged</span>
+          </div>
+
+          <button class="btn-primary" id="btn-save-settings">Save Settings</button>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="popup-footer">
+      <span>Progsu v1.0</span>
+      <span>·</span>
+      <span>Open LinkedIn to get started</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
