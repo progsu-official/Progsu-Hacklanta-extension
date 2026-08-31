@@ -2,6 +2,8 @@
 
 A Chrome extension that speeds up LinkedIn outreach for the Progsu team. It pastes templated messages straight into LinkedIn's chat composer, personalizes them with the recipient's name and company, and tracks who has already been contacted so two people never message the same person twice.
 
+Point every teammate's copy at one Google Sheet and that last part becomes enforced rather than advisory: whoever reaches out first owns the profile, and everyone else is **blocked** from messaging them — see [Sharing the contacted list across the team](#sharing-the-contacted-list-across-the-team).
+
 Built for Hacklanta.
 
 ---
@@ -40,7 +42,7 @@ That's it. No build step, no `npm install`, no dependencies — it's plain JavaS
 
 Open the popup, go to the **Settings** tab, set **Your name**, and hit Save.
 
-Do this before you send anything. Every profile you mark as contacted is stamped with this name, so when the team merges lists later you can tell who reached out to whom. Skip it and everything you send is attributed to "Team Member".
+Do this before you send anything. Every profile you mark as contacted is stamped with this name — it's what teammates see on the block notice when they land on someone you already messaged. Skip it and everything you send is attributed to "Team Member".
 
 ---
 
@@ -93,7 +95,9 @@ The extension never clicks Send for you. You always review and send the message 
 
 When you open a profile someone on the team has already contacted, a banner appears at the top of the page showing who reached out, when, and with which template. The composer toolbar shows the same warning as a chip.
 
-Nothing is blocked — you can still message them. It just makes sure it's a deliberate choice.
+By default you are also **blocked from messaging them**. The message box stops accepting input, LinkedIn's Send button stops responding, the Message button on their profile stops opening a chat, and auto-paste refuses to fill anything in. A red panel over the composer says who reached out and when.
+
+If you want warnings without the block, turn off **Block duplicate outreach** in Settings and everything reverts to advisory.
 
 You also don't have to open a profile to find out. Anywhere LinkedIn lists people — search results, My Network, your connections, the feed — anyone already contacted gets a small amber badge next to their name showing who reached out:
 
@@ -111,15 +115,42 @@ The **Contacted** tab in the popup lists everyone recorded, with search. Remove 
 
 ## Sharing the contacted list across the team
 
-This is the part that matters most for group outreach. Storage is local to each browser, so the list does **not** sync automatically. You have to pass it around.
+Point every teammate's copy of Progsu at one Google Sheet and the contacted list becomes shared. Whoever reaches out to a profile first owns it, and every other install is blocked from messaging that person — that is the whole point of the setup.
 
-**To share yours:** Popup → **Contacted** tab → **Export**. You get JSON. Drop it in the team chat or a shared drive.
+### Setting up the sheet (once, by one person)
 
-**To pull in a teammate's:** Popup → **Contacted** tab → **Import** → paste the JSON → confirm.
+1. Create a Google Sheet.
+2. **Extensions → Apps Script**. Delete the placeholder code and paste in the contents of [`sheets/Code.gs`](sheets/Code.gs). Save.
+3. Change `SHARED_TOKEN` at the top to any random string. This is the password for the whole database — treat it like one.
+4. **Deploy → New deployment → Web app**, with:
+   - **Execute as:** Me
+   - **Who has access:** Anyone
+5. Copy the `/exec` URL it gives you.
 
-Import **merges** rather than overwrites, so importing someone else's list never wipes your own. Where the same profile appears in both, the imported entry wins.
+"Anyone" is required because the extension calls the script without a Google login. The token is what actually gates access, so anyone holding both the URL and the token can read and write the list.
 
-A reasonable rhythm: everyone exports at the end of a session, one person merges them all, and posts the combined file for the team to import before the next push.
+### Connecting each teammate
+
+Popup → **Settings** → **Team Sync**. Paste the `/exec` URL and the token, tick **Use the team sheet**, and hit **Test Connection** then **Save Sync Settings**. Repeat on every machine with the same two values.
+
+If you already have contacts recorded locally, **Upload My List** pushes them onto the sheet. Rows a teammate already logged are skipped rather than duplicated.
+
+### How it stays in sync
+
+| When | What happens |
+|---|---|
+| You mark someone as contacted | Saved locally, then pushed to the sheet immediately |
+| You open a profile or a chat | The sheet is asked directly, so a teammate's outreach from two minutes ago already blocks you |
+| Every 5 minutes | A background sync pulls the whole sheet down |
+| You're offline | Marks are queued and your local list still answers the block question; the queue flushes on the next successful sync |
+
+Two people marking the same profile at the same moment is handled on the sheet itself, under a lock: the first write wins, the second is told who got there first, and only one row is ever created.
+
+**Removing** someone from the Contacted tab deletes their row from the sheet, which unblocks them for the whole team. **Clear All** only wipes your own copy — the sheet is left alone, so one person tidying up can't erase everyone's history (a sync brings it all back).
+
+### Without a sheet
+
+Team Sync is optional. Leave it off and the extension behaves as it did before: everything local, shared by hand with **Export** / **Import** on the Contacted tab. Import merges rather than overwrites, and where the same profile appears in both, the earlier outreach is kept.
 
 ---
 
@@ -131,6 +162,8 @@ A reasonable rhythm: everyone exports at the end of a session, one person merges
 | **Auto-paste** | Automatically pastes the default template when a composer opens |
 | **Show badge** | Shows the "already contacted" banner on profiles |
 | **Tag contacted people in search results** | Adds a badge next to already-messaged people in search, My Network, connections and the feed |
+| **Block duplicate outreach** | Refuses to message anyone the team has already contacted. On by default |
+| **Team Sync** | URL and token for the shared Google Sheet — see [Sharing the contacted list](#sharing-the-contacted-list-across-the-team) |
 
 | if the extention isnt working reload the page and it will load in on the current page |
 
@@ -141,32 +174,42 @@ A reasonable rhythm: everyone exports at the end of a session, one person merges
 ```
 manifest.json          Manifest V3 config, permissions, entry points
 background/
-  background.js        Service worker — storage and message routing
+  background.js        Service worker — storage, message routing, sync engine
+  sheets.js            Google Sheet client and the merge rules
 content/
-  content.js           Injected into LinkedIn: composer detection, paste, badges, list markers
-  content.css          Styles for the on-page toolbar and banner
+  content.js           Injected into LinkedIn: composer detection, paste, badges, markers, block guards
+  content.css          Styles for the on-page toolbar, banner and block overlay
 popup/
   popup.html           Popup UI — Templates / Contacted / Settings tabs
   popup.js             Popup logic
   popup.css            Popup styles
+sheets/
+  Code.gs              Apps Script to paste into the team's Google Sheet
+tests/                 Node test suites — run with `node tests/<name>.test.mjs`
 icons/                 16, 48, 128 px extension icons
 ```
 
 The background worker owns all storage. The content script and popup never touch `chrome.storage` directly — they send messages (`GET_TEMPLATES`, `MARK_CONTACTED`, `CHECK_PROFILE`, and so on) and the worker handles them. Adding a feature that persists something means adding a handler there.
 
+Contacted profiles live in two places: `chrome.storage.local` is a fast cache every UI reads, and the Google Sheet is the team's source of truth. When the two disagree, the **earlier** outreach wins — the question being answered is "has anyone reached out yet?", and the first contact is the answer. `background/sheets.js` holds that rule in one place (`pickWinner`), and the sheet is authoritative on whether a row exists at all, which is how a removal reaches other installs.
+
 ---
 
 ## Permissions and privacy
 
-The extension requests four things, and nothing more:
+The extension requests:
 
 - `storage` — save templates and the contacted list
 - `activeTab` and `scripting` — interact with the LinkedIn tab you have open
+- `alarms` — schedule the background sync
 - `https://www.linkedin.com/*` — run only on LinkedIn
+- `https://script.google.com/*` and `https://script.googleusercontent.com/*` — reach your team's Apps Script deployment
 
-**All data stays in your browser.** There is no backend, no analytics, and no external server — the only domain the code touches is `linkedin.com`. Nothing is transmitted anywhere. Data leaves your machine only when you explicitly click Export.
+**With Team Sync off, nothing leaves your browser.** There is no analytics and no server of ours; the only domain the code touches is `linkedin.com`, and data leaves only when you click Export.
 
-Uninstalling the extension deletes the templates and contacted list with it. Export first if you want to keep them.
+**With Team Sync on**, contacted profiles are sent to *your own* Google Sheet, through *your own* Apps Script deployment. Nothing is routed through any third party. What goes on the sheet is the profile URL, the person's name, the date, who reached out, and which template was used — never message contents. Anyone holding the Web App URL and the token can read and write that sheet, so share both only with the team.
+
+Uninstalling the extension deletes the local templates and contacted list with it. The Google Sheet is unaffected. Export first if you want to keep the local copy.
 
 ---
 
@@ -183,6 +226,21 @@ Mark Sent needs a profile URL to key the record on, and some message threads don
 
 **Placeholders show up literally in the sent message.**
 The value couldn't be read from the page — common on profiles with no listed company. Fill it in by hand before sending.
+
+**Team Sync says "Got a Google login page instead of data."**
+The deployment isn't public. Redeploy the Apps Script web app with **Who has access: Anyone**, and make sure you copied the `/exec` URL rather than `/dev`.
+
+**Team Sync says "Bad or missing token."**
+The token in the popup doesn't match `SHARED_TOKEN` in the script. They are case-sensitive and must match exactly on every machine.
+
+**Team Sync says "Sheet did not answer in time."**
+An Apps Script deployment that hasn't been called in a while takes a few seconds to wake up. Hit **Sync Now** again. If it keeps failing, your marks are queued locally — the counter next to the status line shows how many are waiting — and they upload on the next successful sync.
+
+**Someone is blocked who shouldn't be.**
+Open the **Contacted** tab, find them, and remove the entry. That deletes their row from the team sheet and unblocks them everywhere. To lift blocking entirely, turn off **Block duplicate outreach** in Settings.
+
+**A block won't lift after a teammate removed the row.**
+Each install caches a verdict for 30 seconds. Wait a moment, or hit **Sync Now** in Settings.
 
 **The badges next to names don't appear.**
 Check **Tag contacted people in search results** is on in Settings. If it is, the person may be recorded under a different profile URL than the one the list links to — open their profile and check for the banner. Failing that, LinkedIn changed their markup; see `MARKER_EXCLUDE_SELECTOR` in `content.js`.
@@ -203,6 +261,22 @@ Two things worth knowing before changing `content.js`:
 **List markers key off `href`, not classes.** `annotateProfileLinks()` finds people by `a[href*="/in/"]` and normalizes the URL, because the `/in/` href is the one part of LinkedIn's markup that survives their redesigns. Two guards there are load-bearing: `data-progsu-marked` stops the MutationObserver from reacting to our own injection in an endless loop, and the row check stops a person being stamped twice when their avatar and name are separate links to the same profile.
 
 **Pasting is deliberately indirect.** LinkedIn's composer is a React-backed `contenteditable`, so setting `innerHTML` alone leaves the Send button disabled — React never sees the change. The paste path dispatches the events LinkedIn's own editor state listens for. Keep that in mind before simplifying it.
+
+**The block is two mechanisms, not one.** A fixed overlay covers the message form and eats the pointer events that would have reached Send; capture-phase `keydown` / `beforeinput` / `paste` / `drop` guards stop anything typed into a box that already has focus. Removing either one leaves a hole. Deletion keys are deliberately allowed through — they can't send anything, and refusing them would strand a draft written before the verdict arrived.
+
+**The block verdict is asynchronous.** `evaluateComposerBlock()` returns a promise and caches the in-flight one, because `composerBlock.blocked` is still `false` while the sheet is being asked. Anything that reads the flag synchronously will paste into a conversation that is about to be sealed — auto-paste awaits the promise for exactly this reason.
+
+### Tests
+
+The sync logic is hard to check by hand, so it has suites that run on plain Node with no dependencies:
+
+```bash
+node tests/merge-rules.test.mjs     # key normalization and first-writer-wins
+node tests/sheet-backend.test.mjs   # sheets/Code.gs against a fake Sheets API
+node tests/cross-install.test.mjs   # two installs + one sheet, end to end
+```
+
+`cross-install.test.mjs` is the interesting one: it boots two separate instances of the real `background.js` against a fake `chrome` API and a `fetch` wired to the real `Code.gs`, then checks that outreach logged by one install blocks the other — including offline queueing, removal propagation, and never deleting local history that was never uploaded.
 
 ---
 

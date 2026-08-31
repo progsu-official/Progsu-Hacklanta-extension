@@ -553,6 +553,7 @@ body {
 .form-hint { margin-top: var(--space-2); }
 
 input[type="text"],
+input[type="password"],
 textarea {
   width: 100%;
   padding: var(--space-2) var(--space-3);
@@ -566,7 +567,8 @@ textarea {
   transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 
-input[type="text"] { min-height: 36px; }
+input[type="text"],
+input[type="password"] { min-height: 36px; }
 
 textarea {
   resize: vertical;
@@ -574,9 +576,11 @@ textarea {
 }
 
 input[type="text"]::placeholder,
+input[type="password"]::placeholder,
 textarea::placeholder { color: var(--text-muted); }
 
 input[type="text"]:focus,
+input[type="password"]:focus,
 textarea:focus {
   outline: none;
   border-color: var(--brand-ring);
@@ -604,10 +608,78 @@ textarea:focus {
 
 .settings-list { padding-bottom: var(--space-4); }
 
-#btn-save-settings {
+#btn-save-settings,
+#btn-save-sheet {
   width: 100%;
   margin-top: var(--space-2);
 }
+
+/* --- Team sync --- */
+
+/* A second heading inside the Settings panel needs a rule above it, or it
+   reads as part of the settings list rather than a new section. */
+.panel-header-sub {
+  margin-top: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--divider);
+}
+
+.sync-pill {
+  padding: 2px var(--space-2);
+  background: var(--surface-raised);
+  border: 1px solid var(--control-border);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.sync-pill-on {
+  background: rgba(110, 231, 183, 0.12);
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.sync-intro { margin-bottom: var(--space-3); }
+
+.sync-intro code {
+  padding: 1px 4px;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.sync-status {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-md);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.sync-status-ok {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.sync-status-warn {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.sync-actions .btn-sm { flex: 1 1 auto; }
 
 /* --- Search --- */
 .search-bar {

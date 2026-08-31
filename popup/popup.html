@@ -232,7 +232,59 @@
             <span class="form-hint">Adds a small badge next to anyone already messaged, in search, My Network, connections and the feed</span>
           </div>
 
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="setting-block-duplicates" checked>
+              <span>Block duplicate outreach</span>
+            </label>
+            <span class="form-hint">Refuses to message anyone the team has already contacted — the message box, the Send button and the Message button all stop working for that person</span>
+          </div>
+
           <button class="btn-primary" id="btn-save-settings">Save Settings</button>
+        </div>
+
+        <div class="panel-header panel-header-sub">
+          <h2>Team Sync</h2>
+          <span class="sync-pill" id="sync-pill">Off</span>
+        </div>
+
+        <div class="settings-list">
+          <p class="form-hint sync-intro">
+            Point every teammate's copy of Progsu at one Google Sheet and the
+            "already contacted" list becomes shared: whoever reaches out first
+            owns the profile, and everyone else is blocked from messaging them.
+            Setup steps are in <code>sheets/Code.gs</code>.
+          </p>
+
+          <div class="form-group">
+            <label for="setting-sheet-url">Apps Script Web App URL</label>
+            <input type="text" id="setting-sheet-url" placeholder="https://script.google.com/macros/s/.../exec">
+            <span class="form-hint">The /exec URL from Deploy &gt; New deployment &gt; Web app</span>
+          </div>
+
+          <div class="form-group">
+            <label for="setting-sheet-token">Shared Token</label>
+            <input type="password" id="setting-sheet-token" placeholder="Must match SHARED_TOKEN in the script">
+            <span class="form-hint">Anyone with the URL and this token can read and write the sheet — treat it like a password</span>
+          </div>
+
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="setting-sheet-enabled">
+              <span>Use the team sheet</span>
+            </label>
+            <span class="form-hint">When off, this install tracks contacts on its own and shares nothing</span>
+          </div>
+
+          <div class="sync-status" id="sync-status" role="status" aria-live="polite"></div>
+
+          <div class="sync-actions">
+            <button class="btn-ghost btn-sm" id="btn-test-sheet">Test Connection</button>
+            <button class="btn-ghost btn-sm" id="btn-sync-now">Sync Now</button>
+            <button class="btn-ghost btn-sm" id="btn-push-all" title="Copy this computer's contacted list into the sheet">Upload My List</button>
+          </div>
+
+          <button class="btn-primary" id="btn-save-sheet">Save Sync Settings</button>
         </div>
       </section>
 
@@ -240,7 +292,7 @@
 
     <!-- Footer -->
     <footer class="popup-footer">
-      <span>Progsu v1.0</span>
+      <span>Progsu v1.1</span>
       <span>·</span>
       <span>Open LinkedIn to get started</span>
     </footer>

@@ -45,7 +45,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const settingAutoPaste = document.getElementById('setting-auto-paste');
   const settingShowBadge = document.getElementById('setting-show-badge');
   const settingShowMarkers = document.getElementById('setting-show-markers');
+  const settingBlockDuplicates = document.getElementById('setting-block-duplicates');
   const btnSaveSettings = document.getElementById('btn-save-settings');
+
+  // Team sync
+  const settingSheetUrl = document.getElementById('setting-sheet-url');
+  const settingSheetToken = document.getElementById('setting-sheet-token');
+  const settingSheetEnabled = document.getElementById('setting-sheet-enabled');
+  const syncPill = document.getElementById('sync-pill');
+  const syncStatus = document.getElementById('sync-status');
+  const btnTestSheet = document.getElementById('btn-test-sheet');
+  const btnSyncNow = document.getElementById('btn-sync-now');
+  const btnPushAll = document.getElementById('btn-push-all');
+  const btnSaveSheet = document.getElementById('btn-save-sheet');
 
   // Stats
   const statToday = document.getElementById('stat-today');
@@ -86,7 +98,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---- Load data from background ----
   async function loadAll() {
-    await Promise.all([loadTemplates(), loadContacted(), loadSettings(), loadStats()]);
+    await Promise.all([
+      loadTemplates(), loadContacted(), loadSettings(), loadStats(), loadSheetConfig()
+    ]);
   }
 
   async function loadTemplates() {
@@ -113,7 +127,47 @@ document.addEventListener('DOMContentLoaded', () => {
       settingAutoPaste.checked = settings.autoPaste !== false;
       settingShowBadge.checked = settings.showBadge !== false;
       settingShowMarkers.checked = settings.showMarkers !== false;
+      settingBlockDuplicates.checked = settings.blockDuplicates !== false;
     }
+  }
+
+  async function loadSheetConfig() {
+    const res = await sendMsg({ type: 'GET_SHEET_CONFIG' });
+    if (res.success) {
+      const c = res.config || {};
+      settingSheetUrl.value = c.url || '';
+      settingSheetToken.value = c.token || '';
+      settingSheetEnabled.checked = !!c.enabled;
+    }
+    await refreshSyncState();
+  }
+
+  async function refreshSyncState() {
+    const res = await sendMsg({ type: 'GET_SYNC_STATE' });
+    if (!res.success) return;
+
+    const state = res.state || {};
+    syncPill.textContent = res.configured ? 'On' : 'Off';
+    syncPill.classList.toggle('sync-pill-on', !!res.configured);
+
+    if (!res.configured) {
+      setSyncStatus('Not connected — this install keeps its contacted list to itself.', '');
+      return;
+    }
+
+    const parts = [state.lastSyncAt
+      ? 'Last synced ' + formatDateTime(state.lastSyncAt)
+      : 'Not synced yet'];
+    if (res.pending) parts.push(res.pending + ' waiting to upload');
+    if (state.lastError) parts.push(state.lastError);
+
+    setSyncStatus(parts.join(' · '), state.lastError ? 'warn' : 'ok');
+  }
+
+  function setSyncStatus(text, kind) {
+    syncStatus.textContent = text || '';
+    syncStatus.className = 'sync-status' +
+      (kind === 'ok' ? ' sync-status-ok' : kind === 'warn' ? ' sync-status-warn' : '');
   }
 
   async function loadStats() {
@@ -360,11 +414,13 @@ document.addEventListener('DOMContentLoaded', () => {
     contactedList.querySelectorAll('.contacted-remove').forEach(btn => {
       btn.addEventListener('click', async () => {
         const url = btn.dataset.url;
-        await sendMsg({ type: 'REMOVE_CONTACTED', profileUrl: url });
+        const res = await sendMsg({ type: 'REMOVE_CONTACTED', profileUrl: url });
         delete contactedProfiles[url];
         renderContacted(contactedSearch.value);
         loadStats();
-        showToast('Profile removed');
+        // Removing pulls the row out of the shared sheet, which unblocks the
+        // profile for the whole team — worth saying out loud.
+        showToast(res.synced ? 'Removed for the whole team' : 'Profile removed');
       });
     });
   }
@@ -427,11 +483,15 @@ document.addEventListener('DOMContentLoaded', () => {
   // Clear all
   btnClearAll.addEventListener('click', async () => {
     if (confirm('Are you sure you want to clear ALL contacted profiles? This cannot be undone.')) {
-      await sendMsg({ type: 'CLEAR_ALL_CONTACTED' });
+      const res = await sendMsg({ type: 'CLEAR_ALL_CONTACTED' });
       contactedProfiles = {};
       renderContacted();
       await loadStats();
-      showToast('All profiles cleared');
+      // The team sheet is deliberately untouched — one person tidying up
+      // must not erase everyone else's history, so say where it went.
+      showToast(res.sheetKept
+        ? 'Cleared here — the team sheet is untouched, so a sync brings it back'
+        : 'All profiles cleared');
     }
   });
 
@@ -441,11 +501,89 @@ document.addEventListener('DOMContentLoaded', () => {
       teamName: settingTeamName.value.trim() || 'Team Member',
       autoPaste: settingAutoPaste.checked,
       showBadge: settingShowBadge.checked,
-      showMarkers: settingShowMarkers.checked
+      showMarkers: settingShowMarkers.checked,
+      blockDuplicates: settingBlockDuplicates.checked
     };
     await sendMsg({ type: 'SAVE_SETTINGS', settings });
     notifyContentScripts('SETTINGS_UPDATED');
     showToast('Settings saved!');
+  });
+
+  // ---- Team sync ----
+
+  // What the form currently holds, so Test Connection can check a URL the
+  // user has typed but not yet committed.
+  function draftSheetConfig() {
+    return {
+      url: settingSheetUrl.value.trim(),
+      token: settingSheetToken.value.trim(),
+      enabled: settingSheetEnabled.checked
+    };
+  }
+
+  btnSaveSheet.addEventListener('click', async () => {
+    const config = draftSheetConfig();
+    if (config.enabled && !config.url) {
+      showToast('Add the Web App URL before turning sync on');
+      return;
+    }
+
+    const res = await sendMsg({ type: 'SAVE_SHEET_CONFIG', config });
+    if (!res.success) { showToast(res.error || 'Could not save sync settings'); return; }
+
+    settingSheetEnabled.checked = !!(res.config && res.config.enabled);
+    showToast('Sync settings saved!');
+
+    // Saving an enabled sheet should leave the user looking at real data,
+    // not an empty "not synced yet".
+    if (res.config && res.config.enabled) await runSync();
+    else await refreshSyncState();
+  });
+
+  btnTestSheet.addEventListener('click', async () => {
+    const config = draftSheetConfig();
+    if (!config.url) { showToast('Paste the Web App URL first'); return; }
+
+    setSyncStatus('Testing…', '');
+    const res = await sendMsg({ type: 'TEST_SHEET', config });
+    if (res.success) {
+      setSyncStatus('Connected — ' + res.rows + ' profile' + (res.rows === 1 ? '' : 's') +
+                    ' in the sheet.', 'ok');
+      showToast('Connection works!');
+    } else {
+      setSyncStatus(res.error || 'Could not reach the sheet', 'warn');
+    }
+  });
+
+  btnSyncNow.addEventListener('click', runSync);
+
+  async function runSync() {
+    setSyncStatus('Syncing…', '');
+    const res = await sendMsg({ type: 'SYNC_NOW' });
+    if (!res.success) {
+      setSyncStatus(res.error || 'Sync failed', 'warn');
+      return;
+    }
+    await Promise.all([loadContacted(), loadStats()]);
+    await refreshSyncState();
+    showToast('Synced ' + res.pulled + ' profiles from the team sheet');
+  }
+
+  btnPushAll.addEventListener('click', async () => {
+    const count = Object.keys(contactedProfiles).length;
+    if (!count) { showToast('Nothing to upload yet'); return; }
+    if (!confirm(`Upload ${count} contacted profile${count === 1 ? '' : 's'} to the team sheet?`)) return;
+
+    setSyncStatus('Uploading…', '');
+    const res = await sendMsg({ type: 'PUSH_ALL_TO_SHEET' });
+    if (!res.success) {
+      setSyncStatus(res.error || 'Upload failed', 'warn');
+      return;
+    }
+    // Skipped rows are profiles a teammate already logged, which is the
+    // sheet doing its job rather than an error.
+    setSyncStatus('Uploaded ' + res.added + ' new, ' + res.skipped + ' already on the sheet.', 'ok');
+    await refreshSyncState();
   });
 
   // ---- Utility functions ----
@@ -460,6 +598,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!isoString) return '—';
     const d = new Date(isoString);
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function formatDateTime(isoString) {
+    if (!isoString) return '—';
+    const d = new Date(isoString);
+    return d.toLocaleString('en-US', {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+    });
   }
 
   function getInitials(name) {

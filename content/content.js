@@ -33,6 +33,14 @@
   let scanTimer = null;
   let contactedMap = {};
 
+  // Duplicate-outreach block. Two scopes, because they answer for different
+  // things: the profile page the user is reading, and the conversation the
+  // open composer belongs to (which is often somebody else entirely).
+  let profileBlock = { url: '', blocked: false, details: null };
+  let composerBlock = { key: '', blocked: false, details: null, pending: null, verdictFor: '' };
+  let blockOverlay = null;
+  let blockToastTimer = null;
+
   // LinkedIn ships several messaging layouts (full page, overlay bubble,
   // "Message" modal from a profile). Cast a wide net, then filter.
   // Superset of every selector that has ever worked here. Detection is
@@ -73,6 +81,9 @@
     await loadSettings();
     await loadTemplates();
     await loadContactedMap();
+    // Installed before the first scan: a composer that is already open when
+    // the script loads must not get a window where typing is unguarded.
+    installBlockGuards();
     observePageChanges();
     checkCurrentPage();
     scan();
@@ -115,8 +126,16 @@
     // Polling fallback — LinkedIn can swap the composer in without a mutation
     // we catch, and the toolbar needs repositioning as the page moves.
     setInterval(scan, 1200);
-    window.addEventListener('scroll', positionToolbar, true);
-    window.addEventListener('resize', positionToolbar);
+    window.addEventListener('scroll', repositionFloaters, true);
+    window.addEventListener('resize', repositionFloaters);
+  }
+
+  // Both floating elements are fixed on <body>, so both have to follow the
+  // composer. The overlay especially: a block that drifts off the form is a
+  // block that stops blocking.
+  function repositionFloaters() {
+    positionToolbar();
+    positionBlockOverlay();
   }
 
   function scheduleScan() {
@@ -172,13 +191,21 @@
 
   // ---- Check if profile was already contacted ----
   async function checkIfContacted() {
+    const url = currentProfileUrl;
     try {
       const res = await chrome.runtime.sendMessage({
         type: 'CHECK_PROFILE',
-        profileUrl: currentProfileUrl
+        profileUrl: url
       });
 
-      if (res && res.success && res.contacted && settings.showBadge !== false) {
+      // The user can navigate away mid-lookup; a late answer about the
+      // previous profile must not license messaging this one.
+      if (url !== currentProfileUrl) return;
+
+      const contacted = !!(res && res.success && res.contacted);
+      profileBlock = { url, blocked: contacted, details: contacted ? res.details : null };
+
+      if (contacted && settings.showBadge !== false) {
         showAlreadyContactedBanner(res.details);
       } else {
         removeAlreadyContactedBanner();
@@ -227,6 +254,324 @@
     }
     const existing = document.getElementById('progsu-contacted-banner');
     if (existing) existing.remove();
+  }
+
+  // ============================================================
+  // Duplicate outreach block
+  // ============================================================
+  // The banner above says someone already reached out. This stops you doing
+  // it anyway. Every route that could produce a second message is sealed:
+  // auto-paste, the Paste button, typing, clipboard paste, drag-and-drop,
+  // LinkedIn's own Send button, and the Message button on a profile or a
+  // search row.
+  //
+  // The verdict comes from the background worker, which asks the team's
+  // Google Sheet before falling back to the local cache — so an outreach
+  // logged on a teammate's laptop blocks this one within seconds rather
+  // than at the next sync.
+
+  function blockingEnabled() {
+    return settings.blockDuplicates !== false;
+  }
+
+  /**
+   * The region the guards seal off: the form the blocked composer lives in,
+   * so the Send button and the attachment controls are covered too, not just
+   * the text box. Falls back to the box for layouts with no .msg-form.
+   */
+  function blockedFormEl() {
+    if (!composerBlock.blocked || !activeBox || !activeBox.isConnected) return null;
+    return activeBox.closest('.msg-form, [class*="msg-form"], form[class*="msg"]') || activeBox;
+  }
+
+  /**
+   * Decides whether the conversation this composer belongs to is off limits,
+   * and returns a promise for that verdict.
+   *
+   * Returning the promise — and caching the in-flight one — is what lets
+   * auto-paste wait for an answer instead of racing it. `composerBlock.blocked`
+   * is still false while the sheet is being asked, so anything that reads the
+   * flag synchronously would paste into a conversation about to be sealed.
+   */
+  function evaluateComposerBlock(box) {
+    if (!blockingEnabled()) { clearComposerBlock(); return Promise.resolve(false); }
+
+    const key = getRecipient(box).profileUrl || '';
+
+    // No profile link means no reliable identity. Blocking on a guessed name
+    // would refuse legitimate messages, so an unidentified conversation stays
+    // warn-only — the marker and banner still do their job.
+    if (!key) { clearComposerBlock(); return Promise.resolve(false); }
+
+    // Already asked about this conversation. Re-asking on every scan pass
+    // would be a sheet lookup twice a second.
+    if (key === composerBlock.key) {
+      return composerBlock.pending || Promise.resolve(composerBlock.blocked);
+    }
+
+    // A standing verdict about someone else is worthless here, so it goes.
+    // A standing verdict about *this* person survives the re-check: dropping
+    // it would unseal the composer for one round trip every time a sync or a
+    // settings save invalidates the answer.
+    if (key !== composerBlock.verdictFor) {
+      composerBlock.blocked = false;
+      composerBlock.details = null;
+      removeBlockOverlay();
+    }
+
+    // Key first: resolveComposerBlock compares against it to tell its own
+    // answer apart from a stale one after the await.
+    composerBlock.key = key;
+    composerBlock.pending = resolveComposerBlock(key);
+    return composerBlock.pending;
+  }
+
+  async function resolveComposerBlock(key) {
+    let res;
+    try {
+      res = await chrome.runtime.sendMessage({ type: 'CHECK_PROFILE', profileUrl: key });
+    } catch (e) {
+      return false; // extension context may be invalid
+    }
+
+    // The user can switch conversations while the sheet is answering; a late
+    // verdict about the previous recipient must not be applied to this one.
+    if (composerBlock.key !== key) return false;
+
+    const blocked = !!(res && res.success && res.contacted);
+    composerBlock.blocked = blocked;
+    composerBlock.details = blocked ? res.details : null;
+    composerBlock.verdictFor = key;
+    composerBlock.pending = null;
+
+    if (blocked) {
+      showBlockOverlay(res.details);
+    } else {
+      removeBlockOverlay();
+    }
+    applyBlockToToolbar();
+    return blocked;
+  }
+
+  function clearComposerBlock() {
+    // scan() runs twice a second and reaches here on every pass whenever the
+    // composer has no identifiable recipient, so an already-clear state must
+    // not keep re-running the DOM sweep in removeBlockOverlay.
+    if (!composerBlock.key && !composerBlock.blocked && !blockOverlay) return;
+    composerBlock = { key: '', blocked: false, details: null, pending: null, verdictFor: '' };
+    removeBlockOverlay();
+  }
+
+  function blockReason(details) {
+    const who = (details && details.sentBy) || 'a teammate';
+    return 'Blocked — ' + who + ' already reached out on ' + formatDate(details && details.dateSent);
+  }
+
+  // ---- Overlay covering the composer ----
+
+  function showBlockOverlay(details) {
+    removeBlockOverlay();
+
+    const who = (details && details.sentBy) || 'a teammate';
+    const when = formatDate(details && details.dateSent);
+
+    blockOverlay = document.createElement('div');
+    blockOverlay.id = 'progsu-block-overlay';
+    blockOverlay.setAttribute('role', 'alert');
+    blockOverlay.innerHTML = `
+      <div class="progsu-block-card">
+        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+        </svg>
+        <div class="progsu-block-text">
+          <strong>Already contacted — messaging blocked</strong>
+          <span>${escapeHtml(who)} reached out on ${escapeHtml(when)}. Turn off “Block duplicate outreach” in Progsu settings to override.</span>
+        </div>
+      </div>
+    `;
+
+    // The overlay sits on top of the form and takes the pointer events the
+    // form would have got, which is what stops a click on Send.
+    blockOverlay.addEventListener('mousedown', stopEvent, true);
+    blockOverlay.addEventListener('click', stopEvent, true);
+
+    document.body.appendChild(blockOverlay);
+    positionBlockOverlay();
+  }
+
+  function removeBlockOverlay() {
+    if (blockOverlay) { blockOverlay.remove(); blockOverlay = null; }
+    document.querySelectorAll('#progsu-block-overlay').forEach(el => el.remove());
+  }
+
+  // Fixed on <body> like the toolbar, so it has to track the form it covers.
+  function positionBlockOverlay() {
+    if (!blockOverlay || !blockOverlay.isConnected) return;
+
+    const form = blockedFormEl();
+    if (!form || !isVisible(form)) { blockOverlay.style.visibility = 'hidden'; return; }
+
+    const r = form.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) { blockOverlay.style.visibility = 'hidden'; return; }
+
+    blockOverlay.style.visibility = 'visible';
+    blockOverlay.style.top = r.top + 'px';
+    blockOverlay.style.left = r.left + 'px';
+    blockOverlay.style.width = r.width + 'px';
+    blockOverlay.style.height = Math.max(r.height, 60) + 'px';
+  }
+
+  // A refused keystroke is otherwise indistinguishable from a frozen page.
+  function pulseBlockOverlay() {
+    if (!blockOverlay) return;
+    blockOverlay.classList.remove('progsu-block-pulse');
+    void blockOverlay.offsetWidth; // reflow, so the animation restarts
+    blockOverlay.classList.add('progsu-block-pulse');
+  }
+
+  function applyBlockToToolbar() {
+    if (!toolbar || !toolbar.isConnected) return;
+    const pasteBtn = toolbar.querySelector('.progsu-paste-btn');
+    if (!pasteBtn) return;
+
+    if (!composerBlock.blocked) {
+      pasteBtn.disabled = templates.length === 0;
+      pasteBtn.title = 'Paste template into chat';
+      return;
+    }
+
+    pasteBtn.disabled = true;
+    pasteBtn.title = 'Blocked — this person has already been contacted';
+    setStatus(blockReason(composerBlock.details), 'error');
+  }
+
+  // ---- Event guards ----
+
+  // Keys that navigate, dismiss, or delete rather than write. Swallowing
+  // these would trap the user inside a box they are not allowed to type in —
+  // and deletion can't send anything, so refusing it would only strand a
+  // draft they had started before the verdict landed.
+  const BLOCK_ALLOWED_KEYS = new Set([
+    'Escape', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+    'Home', 'End', 'PageUp', 'PageDown', 'Shift', 'Control', 'Alt', 'Meta',
+    'Backspace', 'Delete'
+  ]);
+
+  function installBlockGuards() {
+    // Capture phase throughout. LinkedIn's own handlers sit on the form and
+    // on document, so a bubble-phase listener would run after the message
+    // had already gone out.
+    document.addEventListener('keydown', onGuardKeydown, true);
+    document.addEventListener('beforeinput', onGuardInput, true);
+    document.addEventListener('paste', onGuardInput, true);
+    document.addEventListener('drop', onGuardInput, true);
+    document.addEventListener('click', onGuardClick, true);
+  }
+
+  function inBlockedComposer(target) {
+    const form = blockedFormEl();
+    if (!form) return false;
+    if (!target || typeof target.closest !== 'function') return false;
+    // Our own controls sit inside the form's screen area but must stay usable.
+    if (target.closest('#progsu-paste-toolbar, #progsu-block-overlay')) return false;
+    return form.contains(target);
+  }
+
+  function onGuardKeydown(e) {
+    if (!inBlockedComposer(e.target)) return;
+    if (BLOCK_ALLOWED_KEYS.has(e.key)) return;
+    // Copy and select-all take nothing out of the box that isn't already in it.
+    if ((e.ctrlKey || e.metaKey) && /^[ac]$/i.test(e.key)) return;
+    stopEvent(e);
+  }
+
+  function onGuardInput(e) {
+    if (!inBlockedComposer(e.target)) return;
+    // Same reasoning as the allowed keys: a deletion adds nothing to the box.
+    // paste and drop events carry no inputType, so they always fall through.
+    if (typeof e.inputType === 'string' && e.inputType.indexOf('delete') === 0) return;
+    stopEvent(e);
+  }
+
+  function onGuardClick(e) {
+    if (inBlockedComposer(e.target)) { stopEvent(e); return; }
+    if (!blockingEnabled()) return;
+
+    const target = e.target;
+    if (!target || typeof target.closest !== 'function') return;
+
+    const btn = target.closest('button, a[role="button"], a[href*="/messaging/"]');
+    if (!btn || !isMessageButton(btn)) return;
+
+    const details = blockedDetailsFor(btn);
+    if (!details) return;
+
+    // Stopping the composer from opening at all is cheaper than opening it
+    // and immediately covering it.
+    stopEvent(e);
+    showBlockToast(details);
+    if (isProfilePage(location.href) && settings.showBadge !== false) {
+      showAlreadyContactedBanner(details);
+    }
+  }
+
+  function isMessageButton(el) {
+    if (el.closest('#progsu-paste-toolbar, #progsu-block-overlay, #progsu-contacted-banner')) return false;
+    const label = (el.getAttribute('aria-label') || '').trim();
+    const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    // "Message Jane Doe" on a profile, a bare "Message" in a list row.
+    return /^message\b/i.test(label) || /^message$/i.test(text);
+  }
+
+  /** Who would this Message button write to, and are they off limits? */
+  function blockedDetailsFor(btn) {
+    if (isProfilePage(location.href)) {
+      return (profileBlock.blocked && profileBlock.url === currentProfileUrl)
+        ? profileBlock.details
+        : null;
+    }
+
+    // In a list the button belongs to a row, and the row's /in/ link names
+    // the person. Answered from the local cache: a list holds dozens of rows
+    // and a sheet lookup per click is the wrong trade for a click guard.
+    const row = btn.closest(MARKER_ROW_SELECTOR);
+    const link = row && row.querySelector('a[href*="/in/"]');
+    const url = link ? normalizeProfileUrl(link.href) : '';
+    return url ? (contactedMap[url] || null) : null;
+  }
+
+  function stopEvent(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+    pulseBlockOverlay();
+  }
+
+  // ---- Toast, for blocks that happen away from the composer ----
+
+  function showBlockToast(details) {
+    let toast = document.getElementById('progsu-block-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'progsu-block-toast';
+      toast.setAttribute('role', 'alert');
+      document.body.appendChild(toast);
+    }
+
+    toast.innerHTML = `
+      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+      </svg>
+      <span>${escapeHtml(blockReason(details))}</span>
+    `;
+    toast.classList.add('progsu-toast-visible');
+
+    clearTimeout(blockToastTimer);
+    blockToastTimer = setTimeout(() => {
+      toast.classList.remove('progsu-toast-visible');
+    }, 5000);
   }
 
   // ============================================================
@@ -341,11 +686,22 @@
       contactedMap = changes.contactedProfiles.newValue || {};
       refreshMarkers();
       if (currentProfileUrl) checkIfContacted();
+
+      // A sync that pulls in a teammate's outreach has to seal the composer
+      // that is already open, so the standing verdict is thrown away and
+      // asked again on the next scan.
+      composerBlock.key = '';
+      if (activeBox && activeBox.isConnected) evaluateComposerBlock(activeBox).catch(() => {});
     }
 
     if (changes.settings) {
       settings = changes.settings.newValue || {};
       refreshMarkers();
+      // Blocking may have just been switched off — or on, over a composer
+      // that is already open.
+      composerBlock.key = '';
+      if (activeBox && activeBox.isConnected) evaluateComposerBlock(activeBox).catch(() => {});
+      else clearComposerBlock();
     }
   });
 
@@ -421,6 +777,7 @@
 
     if (!box) {
       if (toolbar) removeToolbar();
+      clearComposerBlock();
       activeBox = null;
       return;
     }
@@ -432,8 +789,12 @@
       attachToolbar(box);
     }
 
-    positionToolbar();
-    maybeAutoPaste(box);
+    // Runs before auto-paste, and auto-paste re-checks the verdict itself —
+    // the lookup is asynchronous, so "asked first" is not "answered first".
+    evaluateComposerBlock(box).catch(() => {});
+
+    repositionFloaters();
+    maybeAutoPaste(box).catch(() => {});
   }
 
   // ============================================================
@@ -566,13 +927,19 @@
 
     selectEl.addEventListener('change', () => { selectedTemplateId = selectEl.value; });
 
-    pasteBtn.addEventListener('click', () => {
+    pasteBtn.addEventListener('click', async () => {
       const template = templates.find(t => t.id === selectEl.value) || currentTemplate();
       if (!template) { setStatus('No template selected', 'error'); return; }
 
       const target = (activeBox && activeBox.isConnected) ? activeBox : findComposer();
       if (!target) { setStatus('Could not find the message box — click into the chat', 'error'); return; }
       activeBox = target;
+
+      if (await evaluateComposerBlock(target)) {
+        setStatus(blockReason(composerBlock.details), 'error');
+        pulseBlockOverlay();
+        return;
+      }
 
       if (pasteTemplate(target, template)) {
         flashButton(pasteBtn, '✓ Pasted!');
@@ -614,6 +981,9 @@
     });
 
     positionToolbar();
+    // A rebuilt toolbar starts with a live Paste button, so a standing block
+    // has to be re-applied to it.
+    applyBlockToToolbar();
     showContactedChip(box);
   }
 
@@ -686,6 +1056,8 @@
     if (!recipient.profileUrl || settings.showBadge === false) return;
     try {
       const res = await chrome.runtime.sendMessage({ type: 'CHECK_PROFILE', profileUrl: recipient.profileUrl });
+      // The block message says the same thing more firmly; don't overwrite it.
+      if (composerBlock.blocked) return;
       if (res && res.success && res.contacted && toolbar) {
         setStatus('⚠ Already contacted by ' + (res.details.sentBy || 'a team member') +
                   ' on ' + formatDate(res.details.dateSent), 'error');
@@ -831,7 +1203,7 @@
     }, 150);
   }
 
-  function maybeAutoPaste(box) {
+  async function maybeAutoPaste(box) {
     if (!settings.autoPaste) return;
     const template = currentTemplate();
     if (!template) return;
@@ -843,8 +1215,16 @@
     if (key === lastAutoPasteKey) return;
     lastAutoPasteKey = key;
 
+    // Auto-paste is the one path that fires without the user asking, so it
+    // waits for the verdict rather than reading a flag that is still false
+    // because the sheet has not answered yet.
+    if (await evaluateComposerBlock(box)) return;
+
     setTimeout(() => {
-      if (box.isConnected && isBoxEmpty(box)) pasteTemplate(box, template);
+      if (!box.isConnected || !isBoxEmpty(box)) return;
+      // Re-checked on the way out: the verdict can land during the delay.
+      if (composerBlock.blocked) return;
+      pasteTemplate(box, template);
     }, 600);
   }
 
@@ -893,6 +1273,8 @@
   function cleanup() {
     removeToolbar();
     removeAlreadyContactedBanner();
+    clearComposerBlock();
+    profileBlock = { url: '', blocked: false, details: null };
     activeBox = null;
     lastAutoPasteKey = '';
     currentProfileUrl = '';
@@ -1001,24 +1383,35 @@
         return true;
       }
 
-      // The popup holds focus while it is open, and the native paste path needs
-      // the page focused. Paste now if we can, otherwise when focus returns.
-      if (document.hasFocus()) {
-        const ok = pasteTemplate(box, template);
-        sendResponse(ok
-          ? { success: true }
-          : { success: false, error: 'LinkedIn blocked the paste — click inside the chat box and retry' });
-      } else {
+      evaluateComposerBlock(box).then(blocked => {
+        if (blocked) {
+          sendResponse({ success: false, error: blockReason(composerBlock.details) });
+          return;
+        }
+
+        // The popup holds focus while it is open, and the native paste path
+        // needs the page focused. Paste now if we can, otherwise when focus
+        // returns.
+        if (document.hasFocus()) {
+          const ok = pasteTemplate(box, template);
+          sendResponse(ok
+            ? { success: true }
+            : { success: false, error: 'LinkedIn blocked the paste — click inside the chat box and retry' });
+          return;
+        }
+
         let ran = false;
         const run = () => {
           if (ran || !box.isConnected) return;
           ran = true;
+          // The verdict can change while we wait for focus to come back.
+          if (composerBlock.blocked) { pulseBlockOverlay(); return; }
           pasteTemplate(box, template);
         };
         window.addEventListener('focus', () => setTimeout(run, 80), { once: true });
         setTimeout(run, 2500);
         sendResponse({ success: true });
-      }
+      });
       return true;
     }
 

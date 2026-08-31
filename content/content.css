@@ -12,10 +12,15 @@
      error status    #FCA5A5 / #4C1D24   7.33:1  (AA 4.5 ✓)
      banner title    #92400E / #FDE68A   5.69:1  (AA 4.5 ✓)
      banner detail   #78350F / #FDE68A   7.28:1  (AA 4.5 ✓)
+     block title     #FFFFFF / #4C0511  15.70:1  (AA 4.5 ✓)
+     block detail    #FECACA / #4C0511  10.86:1  (AA 4.5 ✓)
+     block toast     #FCA5A5 / #151D2E   8.87:1  (AA 4.5 ✓)
    ============================================================ */
 
 #progsu-paste-toolbar,
-#progsu-contacted-banner {
+#progsu-contacted-banner,
+#progsu-block-overlay,
+#progsu-block-toast {
   --progsu-bg:       #0F172A;
   --progsu-surface:  #151D2E;
   --progsu-raised:   #1B2336;
@@ -36,7 +41,9 @@
 }
 
 #progsu-paste-toolbar *,
-#progsu-contacted-banner * {
+#progsu-contacted-banner *,
+#progsu-block-overlay *,
+#progsu-block-toast * {
   box-sizing: border-box;
 }
 
@@ -309,8 +316,120 @@
 }
 
 /* ============================================================
+   Duplicate-outreach block
+   ============================================================
+   The overlay is laid over LinkedIn's message form (coordinates from
+   positionBlockOverlay) and deliberately opaque enough to read as
+   "this is closed" rather than "this is dimmed". It also swallows the
+   pointer events the form would have received, which is half of what
+   stops a click on Send — the keyboard guards in content.js are the
+   other half.
+   ============================================================ */
+#progsu-block-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  /* One below the toolbar: the toolbar has to stay clickable so the user
+     can still switch templates and see why they are blocked. */
+  z-index: 2147482999;
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  overflow: hidden;
+  background: rgba(76, 5, 17, 0.94);
+  border: 2px solid #B91C1C;
+  border-radius: 8px;
+  cursor: not-allowed;
+  animation: progsu-fade-in 160ms ease-out;
+}
+
+.progsu-block-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: #FFFFFF;
+}
+
+.progsu-block-card svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: #FCA5A5;
+}
+
+.progsu-block-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.progsu-block-text strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.progsu-block-text span {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #FECACA;
+}
+
+/* Fires on every refused keystroke or click — without it a blocked box is
+   indistinguishable from a frozen page. */
+.progsu-block-pulse {
+  animation: progsu-block-pulse 320ms ease-out;
+}
+
+/* ============================================================
+   Block toast — for refusals away from the composer, where there
+   is no overlay on screen to pulse (a Message button in a list).
+   ============================================================ */
+#progsu-block-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 2147483001;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 380px;
+  padding: 12px 16px;
+  background: var(--progsu-surface);
+  border: 1px solid #B91C1C;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  color: #FCA5A5;
+  font-size: 13px;
+  line-height: 1.45;
+
+  /* Kept in the DOM between showings so the timer has something to hide;
+     visibility (not display) so the transition can run. */
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  transition: opacity 180ms ease-out, transform 180ms ease-out, visibility 0s linear 180ms;
+}
+
+#progsu-block-toast.progsu-toast-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition: opacity 180ms ease-out, transform 180ms ease-out, visibility 0s;
+}
+
+#progsu-block-toast svg {
+  flex: 0 0 auto;
+}
+
+/* ============================================================
    Motion
    ============================================================ */
+@keyframes progsu-block-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.65); }
+  100% { box-shadow: 0 0 0 10px rgba(248, 113, 113, 0); }
+}
+
 @keyframes progsu-slide-down {
   from { opacity: 0; transform: translateY(-8px); }
   to   { opacity: 1; transform: none; }
@@ -324,9 +443,12 @@
 @media (prefers-reduced-motion: reduce) {
   #progsu-paste-toolbar,
   #progsu-contacted-banner,
+  #progsu-block-overlay,
+  #progsu-block-toast,
   .progsu-contact-marker,
   #progsu-paste-toolbar *,
-  #progsu-contacted-banner * {
+  #progsu-contacted-banner *,
+  #progsu-block-overlay * {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
