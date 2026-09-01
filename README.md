@@ -2,7 +2,7 @@
 
 A Chrome extension that speeds up LinkedIn outreach for the Progsu team. It pastes templated messages straight into LinkedIn's chat composer, personalizes them with the recipient's name and company, and tracks who has already been contacted so two people never message the same person twice.
 
-Point every teammate's copy at one Google Sheet and that last part becomes enforced rather than advisory: whoever reaches out first owns the profile, and everyone else is **blocked** from messaging them — see [Sharing the contacted list across the team](#sharing-the-contacted-list-across-the-team).
+Point every teammate's copy at one Google Sheet and that last part becomes enforced rather than advisory: whoever reaches out first owns the profile, and everyone else is **blocked** from messaging them — see [SETUP-GUIDE.md](SETUP-GUIDE.md).
 
 Built for Hacklanta.
 
@@ -115,42 +115,13 @@ The **Contacted** tab in the popup lists everyone recorded, with search. Remove 
 
 ## Sharing the contacted list across the team
 
-Point every teammate's copy of Progsu at one Google Sheet and the contacted list becomes shared. Whoever reaches out to a profile first owns it, and every other install is blocked from messaging that person — that is the whole point of the setup.
+Point every teammate's copy of Progsu at one Google Sheet and the contacted list becomes shared. Whoever reaches out to a profile first owns the profile, and every other install is blocked from messaging that person — that is the whole point of the setup.
 
-### Setting up the sheet (once, by one person)
+The sheet is already set up. Connecting takes two minutes: paste one link and one password into the popup's **Team Sync** settings — the same two values for everybody.
 
-1. Create a Google Sheet.
-2. **Extensions → Apps Script**. Delete the placeholder code and paste in the contents of [`sheets/Code.gs`](sheets/Code.gs). Save.
-3. Change `SHARED_TOKEN` at the top to any random string. This is the password for the whole database — treat it like one.
-4. **Deploy → New deployment → Web app**, with:
-   - **Execute as:** Me
-   - **Who has access:** Anyone
-5. Copy the `/exec` URL it gives you.
+**→ [SETUP-GUIDE.md](SETUP-GUIDE.md)** has the link and password to paste in, the two-minute connect steps, what every Team Sync button does, and what to do when something goes wrong.
 
-"Anyone" is required because the extension calls the script without a Google login. The token is what actually gates access, so anyone holding both the URL and the token can read and write the list.
-
-### Connecting each teammate
-
-Popup → **Settings** → **Team Sync**. Paste the `/exec` URL and the token, tick **Use the team sheet**, and hit **Test Connection** then **Save Sync Settings**. Repeat on every machine with the same two values.
-
-If you already have contacts recorded locally, **Upload My List** pushes them onto the sheet. Rows a teammate already logged are skipped rather than duplicated.
-
-### How it stays in sync
-
-| When | What happens |
-|---|---|
-| You mark someone as contacted | Saved locally, then pushed to the sheet immediately |
-| You open a profile or a chat | The sheet is asked directly, so a teammate's outreach from two minutes ago already blocks you |
-| Every 5 minutes | A background sync pulls the whole sheet down |
-| You're offline | Marks are queued and your local list still answers the block question; the queue flushes on the next successful sync |
-
-Two people marking the same profile at the same moment is handled on the sheet itself, under a lock: the first write wins, the second is told who got there first, and only one row is ever created.
-
-**Removing** someone from the Contacted tab deletes their row from the sheet, which unblocks them for the whole team. **Clear All** only wipes your own copy — the sheet is left alone, so one person tidying up can't erase everyone's history (a sync brings it all back).
-
-### Without a sheet
-
-Team Sync is optional. Leave it off and the extension behaves as it did before: everything local, shared by hand with **Export** / **Import** on the Contacted tab. Import merges rather than overwrites, and where the same profile appears in both, the earlier outreach is kept.
+Team Sync is optional. Leave it off and everything stays local, shared by hand with **Export** / **Import** on the Contacted tab.
 
 ---
 
@@ -163,7 +134,7 @@ Team Sync is optional. Leave it off and the extension behaves as it did before: 
 | **Show badge** | Shows the "already contacted" banner on profiles |
 | **Tag contacted people in search results** | Adds a badge next to already-messaged people in search, My Network, connections and the feed |
 | **Block duplicate outreach** | Refuses to message anyone the team has already contacted. On by default |
-| **Team Sync** | URL and token for the shared Google Sheet — see [Sharing the contacted list](#sharing-the-contacted-list-across-the-team) |
+| **Team Sync** | URL and token for the shared Google Sheet — see [SETUP-GUIDE.md](SETUP-GUIDE.md) |
 
 | if the extention isnt working reload the page and it will load in on the current page |
 
@@ -173,6 +144,8 @@ Team Sync is optional. Leave it off and the extension behaves as it did before: 
 
 ```
 manifest.json          Manifest V3 config, permissions, entry points
+README.md              This file — install and day-to-day use
+SETUP-GUIDE.md         Team Sync: connecting to the shared Google Sheet
 background/
   background.js        Service worker — storage, message routing, sync engine
   sheets.js            Google Sheet client and the merge rules
@@ -227,23 +200,14 @@ Mark Sent needs a profile URL to key the record on, and some message threads don
 **Placeholders show up literally in the sent message.**
 The value couldn't be read from the page — common on profiles with no listed company. Fill it in by hand before sending.
 
-**Team Sync says "Got a Google login page instead of data."**
-The deployment isn't public. Redeploy the Apps Script web app with **Who has access: Anyone**, and make sure you copied the `/exec` URL rather than `/dev`.
-
-**Team Sync says "Bad or missing token."**
-The token in the popup doesn't match `SHARED_TOKEN` in the script. They are case-sensitive and must match exactly on every machine.
-
-**Team Sync says "Sheet did not answer in time."**
-An Apps Script deployment that hasn't been called in a while takes a few seconds to wake up. Hit **Sync Now** again. If it keeps failing, your marks are queued locally — the counter next to the status line shows how many are waiting — and they upload on the next successful sync.
-
 **Someone is blocked who shouldn't be.**
 Open the **Contacted** tab, find them, and remove the entry. That deletes their row from the team sheet and unblocks them everywhere. To lift blocking entirely, turn off **Block duplicate outreach** in Settings.
 
-**A block won't lift after a teammate removed the row.**
-Each install caches a verdict for 30 seconds. Wait a moment, or hit **Sync Now** in Settings.
-
 **The badges next to names don't appear.**
 Check **Tag contacted people in search results** is on in Settings. If it is, the person may be recorded under a different profile URL than the one the list links to — open their profile and check for the banner. Failing that, LinkedIn changed their markup; see `MARKER_EXCLUDE_SELECTOR` in `content.js`.
+
+**Anything to do with Team Sync or the Google Sheet.**
+See [If something goes wrong, in SETUP-GUIDE.md](SETUP-GUIDE.md#if-something-goes-wrong) — login pages instead of data, token mismatches, timeouts, blocks that won't lift.
 
 **Changes to the code don't take effect.**
 Go to `chrome://extensions` and hit reload on the extension card. Content script changes also need a LinkedIn tab reload.

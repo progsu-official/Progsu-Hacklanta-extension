@@ -23,7 +23,7 @@
  * ============================================================
  */
 
-var SHARED_TOKEN = 'CHANGE-ME-to-a-random-string';
+var SHARED_TOKEN = '1234';
 var SHEET_NAME   = 'Outreach';
 
 var HEADERS = [
